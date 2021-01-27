@@ -1,6 +1,9 @@
 # GoLang Deadline
 A feature wrapper around [time.Timer](https://pkg.go.dev/time) with extra the support to restart (an active timer) and extend the timer in a thread safe manner. Useful to implement keep alive patterns where something should happen after some inactivity. Adds easy hooks to integrate with contexts.
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/kvanticoss/deadline?style=flat-square)](https://goreportcard.com/report/github.com/kvanticoss/deadline)
+[![Go Doc](https://img.shields.io/badge/godoc-reference-blue.svg?style=flat-square)](https://pkg.go.dev/github.com/kvanticoss/deadline)
+
 ## License
 Apache 2.0
 
