@@ -4,6 +4,9 @@ A feature wrapper around [time.Timer](https://pkg.go.dev/time) with extra the su
 ## License
 Apache 2.0
 
+## Status
+There are likely some races, reviews are welcome. API can be volatile until v1. Used in other projects. Not yet "tested in production".
+
 ## Usage
 
 ```
