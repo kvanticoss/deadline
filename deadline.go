@@ -122,13 +122,35 @@ func (deadline *Deadline) runCallbacks() {
 
 // Reset will set a new deadline duration and instantly call Ping()
 // Reset returns if the dealine has already expiered and the reset operation aborted
-func (deadline *Deadline) Reset(d time.Duration) bool {
+func (deadline *Deadline) Reset(d time.Duration) error {
 	select {
 	case deadline.resetDeadlineCh <- d:
-		return false
+		return nil
 	case <-deadline.ctx.Done():
-		return true
+		return deadline.ctx.Err()
 	}
+}
+
+// Set is a convineince method to work with point in time deadlines rather than durations. Set can/will modify both LastPing and TTL
+// values so using Set in combination with Ping() is not advised.
+func (deadline *Deadline) Set(t time.Time) error {
+	until := time.Until(t)
+
+	deadline.mutex.Lock()
+	defer deadline.mutex.Unlock()
+
+	if err := deadline.ctx.Err(); err != nil {
+		return err
+	}
+
+	if deadline.timeRemainging() > until {
+		return deadline.Reset(until)
+	}
+
+	deadline.deadline = until
+	deadline.lastPing = time.Now()
+
+	return nil
 }
 
 // Stop will terminate the deadline; call the callbacks and frees up resources.
@@ -185,6 +207,10 @@ func (deadline *Deadline) TimeRemainging() time.Duration {
 	deadline.mutex.RLock()
 	defer deadline.mutex.RUnlock()
 
+	return deadline.timeRemainging()
+}
+
+func (deadline *Deadline) timeRemainging() time.Duration {
 	return deadline.deadline - deadline.now().Sub(deadline.lastPing)
 }
 

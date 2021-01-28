@@ -119,14 +119,13 @@ func TestDeadLineResetIncreased(t *testing.T) {
 		}),
 	)
 	assert.Equal(t, dl.Done(), false)
-	assert.Equal(t, false, dl.Reset(3*time.Second))
+	assert.Nil(t, dl.Reset(3*time.Second))
 
 	// Asumes the test will progress from the previous line in < 1 second
 	assert.GreaterOrEqual(t, dl.TimeRemainging(), 2*time.Second)
 }
 
 func TestDeadLineResetDecreased(t *testing.T) {
-
 	// Ensure callback is called
 	callbackCalled := make(chan struct{})
 	dl := deadline.New(10*time.Hour,
@@ -135,12 +134,12 @@ func TestDeadLineResetDecreased(t *testing.T) {
 		}),
 	)
 	assert.Equal(t, dl.Done(), false)
-	assert.Equal(t, false, dl.Reset(time.Millisecond))
+	assert.Nil(t, dl.Reset(time.Millisecond))
 
 	// tests will timeout if this doesn't work
 	<-callbackCalled
 
-	assert.Equal(t, true, dl.Reset(time.Millisecond))
+	assert.Error(t, dl.Reset(time.Millisecond), "An error should be returned if invoked after callbacks ")
 }
 
 func TestDeadLineLastPing(t *testing.T) {
