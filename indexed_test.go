@@ -1,6 +1,7 @@
 package deadline_test
 
 import (
+	"context"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -158,7 +159,7 @@ func TestIndexedStopAll(t *testing.T) {
 	var callbacks int64
 	wgCallbacks := sync.WaitGroup{}
 
-	indices := 100
+	indices := 2
 	wgCallbacks.Add(indices)
 	index := setupIndex(indices, 10, testTimer.Now, func() {
 		atomic.AddInt64(&callbacks, 1)
@@ -166,7 +167,7 @@ func TestIndexedStopAll(t *testing.T) {
 	})
 
 	// Cancel half of them (ignores callbacks)
-	index.StopAll()
+	index.StopAll(context.TODO())
 
 	// Allow callbacks to be triggered by progressing our timer
 	testTimer.Tick(5 * time.Millisecond)

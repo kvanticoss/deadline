@@ -47,7 +47,7 @@ func TestDeadLineCancel(t *testing.T) {
 
 func TestDeadLineStop(t *testing.T) {
 	// Ensure callback is called
-	callbackCalled := make(chan struct{})
+	callbackCalled := make(chan struct{}, 1)
 	dl := deadline.New(10*time.Millisecond,
 		deadline.WithCallback(func() {
 			callbackCalled <- struct{}{}
@@ -112,7 +112,7 @@ func TestDeadLineWithCtx(t *testing.T) {
 func TestDeadLineResetIncreased(t *testing.T) {
 
 	// Ensure callback is called
-	callbackCalled := make(chan struct{})
+	callbackCalled := make(chan struct{}, 1)
 	dl := deadline.New(1*time.Second,
 		deadline.WithCallback(func() {
 			callbackCalled <- struct{}{}
@@ -127,7 +127,7 @@ func TestDeadLineResetIncreased(t *testing.T) {
 
 func TestDeadLineResetDecreased(t *testing.T) {
 	// Ensure callback is called
-	callbackCalled := make(chan struct{})
+	callbackCalled := make(chan struct{}, 1)
 	dl := deadline.New(10*time.Hour,
 		deadline.WithCallback(func() {
 			callbackCalled <- struct{}{}
@@ -144,7 +144,7 @@ func TestDeadLineResetDecreased(t *testing.T) {
 
 func TestDeadLineLastPing(t *testing.T) {
 	// Ensure callback is called
-	callbackCalled := make(chan struct{})
+	callbackCalled := make(chan struct{}, 1)
 
 	now := time.Now()
 	firstTs := now

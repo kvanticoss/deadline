@@ -1,6 +1,7 @@
 package deadline
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -90,16 +91,24 @@ func (ka *Index) CancelAll() {
 	ka.index = map[string]*Deadline{}
 }
 
-// StopAll terminates all deadlines and executes thier the callbacks
-func (ka *Index) StopAll() {
+// StopAll terminates all deadlines and executes thier the callbacks concurrently
+// waiting for all to complete. providate a cancelled context to not wait
+func (ka *Index) StopAll(ctx context.Context) {
 	ka.mu.Lock()
-	defer ka.mu.Unlock()
+	copy := ka.index
+	ka.index = map[string]*Deadline{}
+	ka.mu.Unlock()
 
-	for _, ka := range ka.index {
-		ka.Stop()
+	for _, ka := range copy {
+		ka.ctxCancel()
+	}
+	for _, ka := range copy {
+		select {
+		case <-ctx.Done():
+		case <-ka.callbacksDone:
+		}
 	}
 
-	ka.index = map[string]*Deadline{}
 }
 
 func (ka *Index) getIndexCleanupHook(indexKey string) func() {

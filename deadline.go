@@ -17,6 +17,7 @@ type Deadline struct {
 
 	deadline        time.Duration
 	resetDeadlineCh chan time.Duration
+	callbacksDone   chan struct{}
 
 	callbacks     []func()
 	initCallbacks []func()
@@ -45,6 +46,7 @@ func New(ttl time.Duration, options ...Option) *Deadline {
 
 		deadline:        ttl,
 		resetDeadlineCh: make(chan time.Duration),
+		callbacksDone:   make(chan struct{}),
 
 		callbacks:     []func(){},
 		initCallbacks: []func(){},
@@ -97,7 +99,7 @@ func (deadline *Deadline) monitor() {
 			deadline.mutex.RUnlock()
 
 			if tSinceLastReset >= deadline.deadline {
-				deadline.Stop()
+				deadline.ctxCancel()
 				continue
 			}
 			t.Reset(deadline.deadline - tSinceLastReset)
@@ -118,6 +120,8 @@ func (deadline *Deadline) runCallbacks() {
 	for _, cb := range callbacksCopy {
 		cb()
 	}
+
+	close(deadline.callbacksDone)
 }
 
 // Reset will set a new deadline duration and instantly call Ping()
@@ -136,16 +140,16 @@ func (deadline *Deadline) Reset(d time.Duration) error {
 func (deadline *Deadline) Set(t time.Time) error {
 	until := time.Until(t)
 
-	deadline.mutex.Lock()
-	defer deadline.mutex.Unlock()
-
 	if err := deadline.ctx.Err(); err != nil {
 		return err
 	}
 
+	deadline.mutex.Lock()
 	if deadline.timeRemainging() > until {
+		deadline.mutex.Unlock()
 		return deadline.Reset(until)
 	}
+	defer deadline.mutex.Unlock()
 
 	deadline.deadline = until
 	deadline.lastPing = time.Now()
@@ -159,6 +163,7 @@ func (deadline *Deadline) Stop() {
 		return
 	}
 	deadline.ctxCancel()
+	<-deadline.callbacksDone
 }
 
 // Cancel will terminate the deadline; but not call any callbacks. Returns if the callbacks have been called prior to calling Cancel()
