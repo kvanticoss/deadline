@@ -25,13 +25,19 @@ func (ka *Index) Get(indexKey string) *Deadline {
 	ka.mu.Lock()
 	defer ka.mu.Unlock()
 
+	return ka.get(indexKey)
+}
+
+// get is a mutex free version of Get
+func (ka *Index) get(indexKey string) *Deadline {
 	return ka.index[indexKey]
 }
 
-// GetOrCreate will return the deadline object situation at the index or create it using the arguements
+// GetOrCreate will return the deadline at the index or create it using the arguements
 // Due to the async nature of this package it is possible that a deadline object is returned which is already
-// done; as such the user should do ka := index.GetOrCreate(....); ka.Ping(); if ka.Done() { retry... }.
-// This is autoamtically handled by the PingOrCreate method. This is the preferred method.
+// terminated or in the process of being terminated; as such the user should do
+// ka := index.GetOrCreate(....); if ka.Ping() != nil { re-create... }.
+// This is autoamtically handled by the PingOrCreate method.
 func (ka *Index) GetOrCreate(indexKey string, deadline time.Duration, options ...Option) *Deadline {
 	ka.mu.Lock()
 	defer ka.mu.Unlock()
@@ -40,37 +46,37 @@ func (ka *Index) GetOrCreate(indexKey string, deadline time.Duration, options ..
 		return k
 	}
 
-	options = append(options, WithCallback(ka.getIndexCleanupHook(indexKey)))
-	ka.index[indexKey] = New(deadline, options...)
+	ka.index[indexKey] = New(deadline, append(options, WithCallback(ka.getIndexCleanupHook(indexKey)))...)
 
 	return ka.index[indexKey]
 }
 
 // PingOrCreate does the same as GetOrCreate but handles the case when the deadline object is killed while we return it.
-// in such cases; PingOrCreate will recreate a new deadline Object.
+// in such cases; PingOrCreate will recreate a new deadline Object. NOTE: it could still timeout before being returned
+// the the invoking block (or while it is being retured)
 func (ka *Index) PingOrCreate(indexKey string, maxIdle time.Duration, options ...Option) *Deadline {
 	k := ka.GetOrCreate(indexKey, maxIdle, options...)
-	k.Ping()
-	if k.Done() { // It got cancelled before we could run our .Ping()
+	if k.Ping() != nil { // It got cancelled before we could run our .Ping()
 		return ka.GetOrCreate(indexKey, maxIdle, options...)
 	}
 	return k
 }
 
 // Stop terminates any deadline present on the key and calls the callbacks
+// After Stop the key is guarranteed to be removed from the index
 func (ka *Index) Stop(key string) {
 	if dl := ka.Get(key); dl != nil {
-		dl.Stop() // the callback will remove the index but this can be racy.
-		ka.mu.Lock()
-		delete(ka.index, key)
-		ka.mu.Unlock()
+		dl.Stop()
 	}
 }
 
 // Cancel terminates any deadline present on the key and ignores the callbacks
+// After Cancel the key is guarranteed to be removed from the index
 func (ka *Index) Cancel(key string) (blockedCallbacks bool) {
 	if dl := ka.Get(key); dl != nil {
-		blockedCallbacks = dl.Cancel() // the callback will NOT remove the index since it is never called on cancel
+		blockedCallbacks = dl.Cancel()
+
+		//  We must manually remove ourselves from the index since callbacks doesn't trigger on cancel
 		if !blockedCallbacks {
 			ka.mu.Lock()
 			delete(ka.index, key)
@@ -81,6 +87,7 @@ func (ka *Index) Cancel(key string) (blockedCallbacks bool) {
 }
 
 // CancelAll terminates all deadlines and executes thier the callbacks
+// After CancelAll the keys are guarranteed to be removed from the index
 func (ka *Index) CancelAll() {
 	ka.mu.Lock()
 	defer ka.mu.Unlock()
@@ -93,6 +100,7 @@ func (ka *Index) CancelAll() {
 
 // StopAll terminates all deadlines and executes thier the callbacks concurrently
 // waiting for all to complete. providate a cancelled context to not wait
+// After StopAll the keys are guarranteed to be removed from the index
 func (ka *Index) StopAll(ctx context.Context) {
 	ka.mu.Lock()
 	copy := ka.index

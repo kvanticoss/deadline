@@ -2,6 +2,7 @@ package deadline
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -26,9 +27,6 @@ type Deadline struct {
 
 	now func() time.Time
 }
-
-// Option adds optional configurations to a deadline instance.
-type Option func(*Deadline)
 
 // New returns a deadline which will call each callback sequencially after maxIdle time has passed
 // withouth deadline.Ping() being called.
@@ -59,8 +57,7 @@ func New(ttl time.Duration, options ...Option) *Deadline {
 	for _, cb := range deadline.initCallbacks {
 		cb()
 	}
-
-	// Set the initial with the possibly configured now override
+	// Set the initial ping with the possibly configured now override
 	deadline.Ping()
 
 	go deadline.monitor()
@@ -70,6 +67,8 @@ func New(ttl time.Duration, options ...Option) *Deadline {
 
 func (deadline *Deadline) monitor() {
 	t := time.NewTimer(deadline.deadline)
+
+	// Timer cleanup
 	defer func() {
 		if !t.Stop() {
 			select {
@@ -80,8 +79,11 @@ func (deadline *Deadline) monitor() {
 		deadline.runCallbacks()
 	}()
 
+	defer deadline.ctxCancel()
+
 	for {
 		select {
+		// Change the deadline TTL
 		case newDeadline := <-deadline.resetDeadlineCh:
 			deadline.mutex.Lock()
 			deadline.deadline = newDeadline
@@ -92,17 +94,23 @@ func (deadline *Deadline) monitor() {
 			t.Reset(newDeadline)
 			deadline.mutex.Unlock()
 
+		// Time expired, but we might have called Ping() which can extend the timer
 		case <-t.C:
 			now := deadline.now()
+
 			deadline.mutex.RLock()
-			tSinceLastReset := now.Sub(deadline.lastPing)
+			tSinceLastPing := now.Sub(deadline.lastPing)
+
+			// Did we reach the deadline?
+			if tSinceLastPing >= deadline.deadline {
+				deadline.ctxCancel()
+				deadline.mutex.RUnlock()
+				return
+			}
 			deadline.mutex.RUnlock()
 
-			if tSinceLastReset >= deadline.deadline {
-				deadline.ctxCancel()
-				continue
-			}
-			t.Reset(deadline.deadline - tSinceLastReset)
+			// If not reset it with a new ttl
+			t.Reset(deadline.deadline - tSinceLastPing)
 
 		case <-deadline.ctx.Done():
 			return
@@ -110,17 +118,15 @@ func (deadline *Deadline) monitor() {
 	}
 }
 
+// runCallbacks can only be invoked after deadline.ctxCancel()
+// has been called.
 func (deadline *Deadline) runCallbacks() {
-	deadline.mutex.Lock()
-	callbacksCopy := deadline.callbacks
-	// Prevent callbacks from being invoked twice and give us a signal that we have processed callbacks
-	deadline.callbacks = deadline.callbacks[0:0]
-	deadline.mutex.Unlock()
+	deadline.mutex.RLock()
+	defer deadline.mutex.RUnlock()
 
-	for _, cb := range callbacksCopy {
+	for _, cb := range deadline.callbacks {
 		cb()
 	}
-
 	close(deadline.callbacksDone)
 }
 
@@ -140,21 +146,20 @@ func (deadline *Deadline) Reset(d time.Duration) error {
 func (deadline *Deadline) Set(t time.Time) error {
 	until := time.Until(t)
 
-	if err := deadline.ctx.Err(); err != nil {
-		return err
-	}
-
+	// Do We need to reset our timer since it will not expire in time?
 	deadline.mutex.Lock()
 	if deadline.timeRemainging() > until {
 		deadline.mutex.Unlock()
 		return deadline.Reset(until)
 	}
-	defer deadline.mutex.Unlock()
 
+	// if the new deadline is larger then the time remaining we can wait for the
+	// current time to expire and it will automatically reset to the new deadline
 	deadline.deadline = until
 	deadline.lastPing = time.Now()
+	deadline.mutex.Unlock()
 
-	return nil
+	return deadline.ctx.Err()
 }
 
 // Stop will terminate the deadline; call the callbacks and frees up resources.
@@ -166,22 +171,28 @@ func (deadline *Deadline) Stop() {
 	<-deadline.callbacksDone
 }
 
-// Cancel will terminate the deadline; but not call any callbacks. Returns if the callbacks have been called prior to calling Cancel()
+// Cancel will terminate the deadline; but not call any callbacks. Returns if the
+// callbacks have been called prior to calling Cancel() (or is currently running)
 func (deadline *Deadline) Cancel() bool {
-	// Lockfree check
+	// Precautious check that can avoid deadlocks if a callbacks would ever
+	// (stupidly) call Cancel on itself..
 	if deadline.Done() {
+		// to cover the case when calling cancel twice, the second should incate that no callbacks have been triggered
 		return deadline.callbacks != nil
 	}
 
 	deadline.mutex.Lock()
 	defer deadline.mutex.Unlock()
-	// ensure it still hasn't cancelled
+
 	// we know that runCallbacks can't be called
 	// before deadline.Done() == true so if done is false
 	// we can safely clear the callbacks as runCallbacks
-	// won't be able to read them until we're done
+	// won't be able to read them until we're release our lock
+	// if deadline.Done() is true however, we can't know if they
+	// have run or will run; only that they're not running right now
+	// (due to the lock)
 	if deadline.Done() {
-		return deadline.callbacks != nil
+		return true
 	}
 
 	deadline.callbacks = nil
@@ -189,11 +200,10 @@ func (deadline *Deadline) Cancel() bool {
 	return false
 }
 
-// LastPing holds the timestamp of the last ping / timer done
+// LastPing holds the timestamp of the last accepted Ping() call
 func (deadline *Deadline) LastPing() time.Time {
 	deadline.mutex.RLock()
 	defer deadline.mutex.RUnlock()
-
 	return deadline.lastPing
 }
 
@@ -211,7 +221,6 @@ func (deadline *Deadline) Done() (res bool) {
 func (deadline *Deadline) TimeRemainging() time.Duration {
 	deadline.mutex.RLock()
 	defer deadline.mutex.RUnlock()
-
 	return deadline.timeRemainging()
 }
 
@@ -220,9 +229,11 @@ func (deadline *Deadline) timeRemainging() time.Duration {
 }
 
 // Ping resets the idle timer to zero; non blocking
-func (deadline *Deadline) Ping() {
+// Returns if the deadline got cancelled before Ping
+// could complete it's reset.
+func (deadline *Deadline) Ping() error {
 	if deadline == nil {
-		return
+		return fmt.Errorf("calling Ping() on nil *Deadline is a NOP")
 	}
 
 	now := deadline.now()
@@ -237,4 +248,6 @@ func (deadline *Deadline) Ping() {
 		deadline.lastPing = now
 		deadline.mutex.Unlock()
 	}
+
+	return deadline.ctx.Err()
 }

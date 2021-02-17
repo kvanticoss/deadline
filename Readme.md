@@ -24,7 +24,9 @@ dl := deadline.New(
 dl.Ping()
 ```
 
-`dl.Stop()` stops the timer and executes callbacks. `dl.Cancel()` will stop the timer and remove any callbacks; note that this call is racy and can return false if the callbacks has already been invoked/running/scheduled
+`dl.Stop()` stops the timer and executes callbacks.
+
+`dl.Cancel()` stops the timer and ignores any callbacks; Returns if the callbacks was executed before Cancel could stop them.
 
 if multiple callbacks are added they will be called in blocking sequence. If you need multithreading it should be handled by the callback closure.
 

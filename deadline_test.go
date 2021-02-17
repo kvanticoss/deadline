@@ -262,7 +262,7 @@ func TestCancelStopped(t *testing.T) {
 
 	dl = deadline.New(1 * time.Second)
 	dl.Cancel()
-	assert.Equal(t, false, dl.Cancel(), "if a deadline is stopped with .Cancel(); additional Cancel() calls should report that callbacks have not already been called")
+	assert.Equal(t, false, dl.Cancel(), "if a deadline is stopped with .Cancel(); additional Cancel() calls should report that callbacks have not been called since cancel doesn't trigger callbacks")
 
 }
 

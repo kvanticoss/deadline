@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// Option adds optional configurations to a deadline instance.
+type Option func(*Deadline)
+
 // WithContext adds cancellation by a context or Stop() whichever comes first.
 func WithContext(ctx context.Context) Option {
 	return func(deadline *Deadline) {
@@ -27,7 +30,7 @@ func WithCallback(callback func()) Option {
 	}
 }
 
-// WithPingRateLimit will set the amount of time that needs to be passed before accepting a new Ping(). If multiple
+// WithPingRateLimit will set the amount of time that needs to pass before accepting a new Ping(). If multiple
 // Ping() calls takes place within the the duration only the first will be accepted. Defaults to 0.
 func WithPingRateLimit(maxPingRate time.Duration) Option {
 	return func(deadline *Deadline) {
@@ -35,7 +38,8 @@ func WithPingRateLimit(maxPingRate time.Duration) Option {
 	}
 }
 
-// WithInitCallback adds a callback when a deadline is created. Should only be used with Index
+// WithInitCallback adds a callback when a deadline is created. Should only be used with Index and the creation
+// is depended on race conditions.
 func WithInitCallback(callback func()) Option {
 	return func(deadline *Deadline) {
 		deadline.initCallbacks = append(deadline.initCallbacks, callback)
